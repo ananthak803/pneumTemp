@@ -1,27 +1,42 @@
+from flask import Flask, request, jsonify, send_from_directory
 import tensorflow as tf
 import numpy as np
 import cv2
 import os
-import sys
 
-def detect_pneumonia(model_path, img_path):
-    #load the model
-    pneumonia_model = tf.keras.models.load_model(model_path)
-    
-    #read image and preprocess
-    img = cv2.imread(img_path)
-    if img is None:
-        print(f"Error: Could not read image from {img_path}")
-        return
+app = Flask(__name__, static_folder='public')
+UPLOAD_FOLDER = 'uploads'
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Load the model once at startup
+model_path = os.path.join(os.path.dirname(__file__), 'pneumonia_detection_model.h5')
+pneumonia_model = tf.keras.models.load_model(model_path)
+
+@app.route('/')
+def index():
+    return app.send_static_file('index.html')
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image uploaded'}), 400
+
+    file = request.files['image']
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+    file.save(filepath)
+
+    # Read and preprocess image
+    img = cv2.imread(filepath)
     img = cv2.resize(img, (150, 150))
     img = img.astype('float32') / 255.0
     img = np.expand_dims(img, axis=0)
 
-    #predict
+    # Predict
     prob = pneumonia_model.predict(img)[0][0]
     label = "PNEUMONIA" if prob > 0.5 else "NORMAL"
-    print(label)
 
-
-model_path = os.path.join(os.path.dirname(__file__), 'pneumonia_detection_model.h5')
-detect_pneumonia(model_path,"./uploads/Untitled.jpeg")
+    return jsonify({'label': label, 'prob': float(prob)})
+if __name__ == '__main__':
+    if not os.path.exists(UPLOAD_FOLDER):
+        os.makedirs(UPLOAD_FOLDER)
+    app.run(debug=True)
